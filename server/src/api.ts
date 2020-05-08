@@ -1,3 +1,4 @@
+import cors from 'cors';
 import express from 'express';
 import MysqlConnector from './mysqlConnector';
 import { cleanClass } from './hepler';
@@ -5,6 +6,7 @@ import { cleanClass } from './hepler';
 const routerFunction = express.Router;
 const router = routerFunction();
 const PATH_NOT_FOUND = 404;
+const SERVER_ERROR = 500;
 
 let isConnected = false;
 
@@ -20,8 +22,9 @@ mysql.connect()
   })
   .catch(console.log);
 
-// TODO: add check for isConnected
+router.use(cors());
 
+// TODO: add check for isConnected
 // Simple requests vor just names
 router.get('/schemas', async(req, res) => {
   const schemaNames = await mysql.getSchemas()
@@ -70,6 +73,22 @@ router.get('/field/:schema/:table/:field', async(req, res) => {
     .then(field => cleanClass({ ...field }));
 
   res.json(fieldDetails);
+});
+
+router.post('/query', (req, res) => {
+  req.on('data', (queryTextBuffer: Buffer) => {
+
+    const queryPromisses = queryTextBuffer.toString().split(';')
+      .filter(string => Boolean(string.trim()))
+      .map(async query => mysql.query(query.trim()));
+
+    Promise.all(queryPromisses)
+      .then(response => res.json(response))
+      .catch(error => {
+        res.status(SERVER_ERROR);
+        res.json(error);
+      });
+  });
 });
 
 router.all('/*', (req, res) => {

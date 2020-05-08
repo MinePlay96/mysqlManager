@@ -314,4 +314,19 @@ export default class MysqlConnector extends AConnector {
     });
   }
 
+  public async query(query: string): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      this._mysqlConnection.query(
+        query,
+        (error, result: unknown) => {
+          if (error === null) {
+            resolve(result);
+          } else {
+            reject(error);
+          }
+        }
+      );
+    });
+  }
+
 }
