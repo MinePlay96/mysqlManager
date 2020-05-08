@@ -1,6 +1,6 @@
 import express from 'express';
 import MysqlConnector from './mysqlConnector';
-import { firstLevelObject } from './helper';
+import { cleanClass } from './hepler';
 
 const routerFunction = express.Router;
 const router = routerFunction();
@@ -50,7 +50,7 @@ router.get('/fields/:schema/:table', async(req, res) => {
 // Requests vor details
 router.get('/schema/:schema', async(req, res) => {
   const schemaDetails = await mysql.getSchema(req.params.schema)
-    .then(schema => firstLevelObject({ ...schema }));
+    .then(schema => cleanClass({ ...schema }));
 
   res.json(schemaDetails);
 });
@@ -58,7 +58,7 @@ router.get('/schema/:schema', async(req, res) => {
 router.get('/table/:schema/:table', async(req, res) => {
   const tableDetails = await mysql.getSchema(req.params.schema)
     .then(async schema => schema.getTable(req.params.table))
-    .then(table => firstLevelObject({ ...table }));
+    .then(table => cleanClass({ ...table }));
 
   res.json(tableDetails);
 });
@@ -67,7 +67,7 @@ router.get('/field/:schema/:table/:field', async(req, res) => {
   const fieldDetails = await mysql.getSchema(req.params.schema)
     .then(async schema => schema.getTable(req.params.table))
     .then(async table => table.getField(req.params.field))
-    .then(field => firstLevelObject({ ...field }));
+    .then(field => cleanClass({ ...field }));
 
   res.json(fieldDetails);
 });
