@@ -1,94 +1,134 @@
 import cors from 'cors';
 import express from 'express';
 import MysqlConnector from './mysqlConnector';
-import { cleanClass } from './hepler';
+import { cleanClass, getBody, testForToken } from './hepler';
+import { v4 as uuidv4 } from 'uuid';
 
 const routerFunction = express.Router;
 const router = routerFunction();
+const NOT_AUTHORISED = 403;
 const PATH_NOT_FOUND = 404;
 const SERVER_ERROR = 500;
 
-let isConnected = false;
-
-const mysql = new MysqlConnector({
-  host: '127.0.0.1',
-  password: '12345678',
-  user: 'root'
-});
-
-mysql.connect()
-  .then(() => {
-    isConnected = true;
-  })
-  .catch(console.log);
+const mysqlConnetions: {
+  [token: string]: {
+    lastUsed: Date;
+    connection: MysqlConnector;
+  };
+} = {};
 
 router.use(cors());
 
 // TODO: add check for isConnected
 // Simple requests vor just names
-router.get('/schemas', async(req, res) => {
-  const schemaNames = await mysql.getSchemas()
-    .then(schemas => schemas.map(schema => schema.name));
+router.post('/connect', (req, res) => {
+  const connection = new MysqlConnector(req.body);
 
-  res.json(schemaNames);
+  connection.connect()
+    .then(() => {
+      const uuid = uuidv4();
+
+      mysqlConnetions[uuid] = {
+        connection,
+        lastUsed: new Date()
+      };
+
+      res.json({
+        success: true,
+        token: uuid
+      });
+    })
+    .catch(error => {
+      res.status(NOT_AUTHORISED);
+      res.json(error);
+    });
 });
 
-router.get('/tables/:schema', async(req, res) => {
-  const tableNames = await mysql.getSchema(req.params.schema)
+router.get('/schemas', (req, res) => {
+  getBody(req)
+    .then(async body => testForToken(body, mysqlConnetions))
+    .then(async({ token }) => mysqlConnetions[token].connection.getSchemas())
+    .then(schemas => schemas.map(schema => schema.name))
+    .then(schemas => {
+      console.log(schemas);
+      res.json(schemas);
+    })
+    .catch(console.log);
+});
+
+router.get('/tables/:schema', (req, res) => {
+  getBody(req)
+    .then(async body => testForToken(body, mysqlConnetions))
+    .then(({ token }) => mysqlConnetions[token].connection)
+    .then(async connection => connection.getSchema(req.params.schema))
     .then(async schema => schema.getTables())
-    .then(tables => tables.map(table => table.name));
-
-  res.json(tableNames);
+    .then(tables => tables.map(table => table.name))
+    .then(res.json)
+    .catch(console.log);
 });
 
-router.get('/fields/:schema/:table', async(req, res) => {
-  const tableNames = await mysql.getSchema(req.params.schema)
+router.get('/fields/:schema/:table', (req, res) => {
+  getBody(req)
+    .then(async body => testForToken(body, mysqlConnetions))
+    .then(({ token }) => mysqlConnetions[token].connection)
+    .then(async connection => connection.getSchema(req.params.schema))
     .then(async schema => schema.getTable(req.params.table))
     .then(async table => table.getFields())
-    .then(fields => fields.map(field => field.name));
-
-  res.json(tableNames);
+    .then(fields => fields.map(field => field.name))
+    .then(res.json)
+    .catch(console.log);
 });
 
 // Requests vor details
-router.get('/schema/:schema', async(req, res) => {
-  const schemaDetails = await mysql.getSchema(req.params.schema)
-    .then(schema => cleanClass({ ...schema }));
-
-  res.json(schemaDetails);
+router.get('/schema/:schema', (req, res) => {
+  getBody(req)
+    .then(async body => testForToken(body, mysqlConnetions))
+    .then(({ token }) => mysqlConnetions[token].connection)
+    .then(async schema => schema.getSchema(req.params.schema))
+    .then(res.json)
+    .catch(console.log);
 });
 
-router.get('/table/:schema/:table', async(req, res) => {
-  const tableDetails = await mysql.getSchema(req.params.schema)
+router.get('/table/:schema/:table', (req, res) => {
+  getBody(req)
+    .then(async body => testForToken(body, mysqlConnetions))
+    .then(({ token }) => mysqlConnetions[token].connection)
+    .then(async connection => connection.getSchema(req.params.schema))
     .then(async schema => schema.getTable(req.params.table))
-    .then(table => cleanClass({ ...table }));
-
-  res.json(tableDetails);
+    .then(res.json)
+    .catch(console.log);
 });
 
-router.get('/field/:schema/:table/:field', async(req, res) => {
-  const fieldDetails = await mysql.getSchema(req.params.schema)
+router.get('/field/:schema/:table/:field', (req, res) => {
+  getBody(req)
+    .then(async body => testForToken(body, mysqlConnetions))
+    .then(({ token }) => mysqlConnetions[token].connection)
+    .then(async connection => connection.getSchema(req.params.schema))
     .then(async schema => schema.getTable(req.params.table))
     .then(async table => table.getField(req.params.field))
-    .then(field => cleanClass({ ...field }));
-
-  res.json(fieldDetails);
+    .then(res.json)
+    .catch(console.log);
 });
 
-router.post('/query', (req, res) => {
-  req.on('data', (queryTextBuffer: Buffer) => {
+router.post('/query', async(req, res) => {
+  const body = await getBody(req)
+    .then(async bodyData => testForToken(bodyData, mysqlConnetions));
 
-    const queryPromisses = queryTextBuffer.toString().split(';')
-      .filter(string => Boolean(string.trim()))
-      .map(async query => mysql.query(query.trim()));
+  if (typeof body.query !== 'string') {
+    throw new Error('QUERY IS NOT DEFINED');
+  }
 
-    Promise.all(queryPromisses)
-      .then(response => res.json(response))
-      .catch(error => {
-        res.status(SERVER_ERROR);
-        res.json(error);
-      });
-  });
+  const queryPromisses = body.query.split(';')
+    .filter(string => Boolean(string.trim()))
+    .map(async query => mysqlConnetions[body.token].connection
+      .query(query.trim()));
+
+  Promise.all(queryPromisses)
+    .then(response => res.json(response))
+    .catch(error => {
+      res.status(SERVER_ERROR);
+      res.json(error);
+    });
 });
 
 router.all('/*', (req, res) => {
